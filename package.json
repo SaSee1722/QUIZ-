@@ -1,0 +1,33 @@
+{
+    "name": "phyjax",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "dev": "node server.mjs",
+        "build": "next build",
+        "start": "NODE_ENV=production node server.mjs",
+        "lint": "next lint"
+    },
+    "dependencies": {
+        "next": "latest",
+        "react": "latest",
+        "react-dom": "latest",
+        "socket.io": "^4.7.2",
+        "socket.io-client": "^4.7.2",
+        "lucide-react": "latest",
+        "framer-motion": "latest",
+        "canvas-confetti": "^1.9.2",
+        "mongodb": "^6.3.0",
+        "clsx": "^2.1.0",
+        "tailwind-merge": "^2.2.1"
+    },
+    "devDependencies": {
+        "@types/node": "latest",
+        "@types/react": "latest",
+        "@types/react-dom": "latest",
+        "@types/canvas-confetti": "^1.6.4",
+        "typescript": "latest",
+        "eslint": "latest",
+        "eslint-config-next": "latest"
+    }
+}
