@@ -1,13 +1,9 @@
 import type { Metadata } from "next";
-import { Inter, Outfit } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
-const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit" });
-
 export const metadata: Metadata = {
-    title: "PHYJAX | Real-time Physics Quiz",
-    description: "Experience physics like never before with real-time interactive quizzes.",
+    title: "PHYJAX | CSE Stream Event",
+    description: "The ultimate real-time quiz platform for CSE stream challenges and technical events.",
 };
 
 export default function RootLayout({
@@ -17,7 +13,7 @@ export default function RootLayout({
 }>) {
     return (
         <html lang="en">
-            <body className={`${inter.variable} ${outfit.variable}`}>
+            <body className="antialiased selection:bg-indigo-100 selection:text-indigo-900">
                 {children}
             </body>
         </html>

@@ -1,169 +1,403 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { use, useEffect, useState, useRef } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { io, Socket } from "socket.io-client";
-import { motion } from "framer-motion";
-import { CheckCircle2, AlertCircle } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { CheckCircle2, XCircle, Clock, Wifi, Trophy, AlertTriangle, Zap, User, ArrowLeft, Send } from "lucide-react";
 
 let socket: Socket;
 
-export default function PlayerPage({ params }: { params: { pin: string } }) {
+const OPTION_STYLES = [
+    { bg: "bg-blue-500", hover: "hover:bg-blue-600", icon: "▲", label: "A" },
+    { bg: "bg-purple-500", hover: "hover:bg-purple-600", icon: "◆", label: "B" },
+    { bg: "bg-emerald-500", hover: "hover:bg-emerald-600", icon: "■", label: "C" },
+    { bg: "bg-orange-500", hover: "hover:bg-orange-600", icon: "●", label: "D" },
+];
+
+export default function PlayerPage({ params }: { params: Promise<{ pin: string }> }) {
+    const { pin } = use(params);
     const searchParams = useSearchParams();
-    const nickname = searchParams.get("name");
-    const [status, setStatus] = useState<"JOINING" | "LOBBY" | "STARTING" | "QUESTION" | "RESULTS" | "ERROR">("JOINING");
+    const nickname = searchParams.get("nickname") ?? "Explorer";
+    const router = useRouter();
+
+    const [status, setStatus] = useState<"JOINING" | "LOBBY" | "STARTING" | "QUESTION" | "ANSWERED" | "WAITING" | "SESSION_ENDED" | "ERROR">("JOINING");
     const [error, setError] = useState<string | null>(null);
     const [currentQuestion, setCurrentQuestion] = useState<any>(null);
     const [feedback, setFeedback] = useState<"CORRECT" | "INCORRECT" | null>(null);
+    const [pointsEarned, setPointsEarned] = useState<number>(0);
+    const [totalScore, setTotalScore] = useState<number>(0);
+    const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
     const [hasAnswered, setHasAnswered] = useState(false);
+    const [answerText, setAnswerText] = useState("");
+    const [quizTitle, setQuizTitle] = useState("");
+    const [timeLeft, setTimeLeft] = useState<number>(0);
+    const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     useEffect(() => {
         socket = io();
-
         socket.on("connect", () => {
-            socket.emit("join-lobby", { pin: params.pin, nickname });
+            console.log("Connected to socket, joining PIN:", pin);
+            socket.emit("join-lobby", { pin, nickname });
         });
-
-        socket.on("join-success", () => {
+        socket.on("join-success", (data) => {
             setStatus("LOBBY");
+            setQuizTitle(data.quizTitle || "Quiz Arena");
         });
-
         socket.on("join-error", (msg) => {
             setStatus("ERROR");
             setError(msg);
         });
-
-        socket.on("game-starting", () => {
-            setStatus("STARTING");
-        });
-
-        socket.on("new-question", (questionData) => {
+        socket.on("game-starting", () => setStatus("STARTING"));
+        socket.on("new-question", (q) => {
             setStatus("QUESTION");
-            setCurrentQuestion(questionData);
+            setCurrentQuestion(q);
             setFeedback(null);
+            setSelectedIndex(null);
             setHasAnswered(false);
-        });
+            setAnswerText("");
+            setTimeLeft(q.time);
 
-        socket.on("answer-acknowledged", (isCorrect) => {
+            // Start live countdown
+            if (timerRef.current) clearInterval(timerRef.current);
+            timerRef.current = setInterval(() => {
+                setTimeLeft(prev => {
+                    if (prev <= 1) {
+                        clearInterval(timerRef.current!);
+                        return 0;
+                    }
+                    return prev - 1;
+                });
+            }, 1000);
+        });
+        socket.on("answer-acknowledged", ({ isCorrect, pointsEarned: pts, totalScore: total }) => {
+            if (timerRef.current) clearInterval(timerRef.current);
             setFeedback(isCorrect ? "CORRECT" : "INCORRECT");
+            setPointsEarned(pts || 0);
+            setTotalScore(total || 0);
             setHasAnswered(true);
+            setStatus("ANSWERED");
         });
-
+        // After each question results phase, server will send next question or game-over
+        // Show a "waiting" state between ANSWERED and next question
         socket.on("question-results", () => {
-            setStatus("RESULTS");
+            setStatus("WAITING");
+            if (timerRef.current) clearInterval(timerRef.current);
         });
-
+        socket.on("game-over", () => {
+            setStatus("WAITING");
+            if (timerRef.current) clearInterval(timerRef.current);
+        });
+        socket.on("host-ended-session", () => {
+            if (timerRef.current) clearInterval(timerRef.current);
+            setStatus("SESSION_ENDED");
+            // Auto-redirect to home after 3 seconds
+            setTimeout(() => {
+                router.push("/");
+            }, 3000);
+        });
         return () => {
             socket.disconnect();
+            if (timerRef.current) clearInterval(timerRef.current);
         };
-    }, [params.pin, nickname]);
+    }, [pin, nickname]);
 
-    const submitAnswer = (index: number) => {
+    const submitAnswer = (index?: number, text?: string) => {
         if (!hasAnswered) {
-            socket.emit("submit-answer", { pin: params.pin, answerIndex: index });
+            if (index !== undefined) setSelectedIndex(index);
+            socket.emit("submit-answer", {
+                pin,
+                answerIndex: index,
+                answerText: text
+            });
+            setHasAnswered(true);
         }
     };
 
-    if (status === "JOINING") {
-        return (
-            <div className="flex flex-col items-center justify-center min-vh-100 p-6">
-                <motion.div
-                    animate={{ scale: [1, 1.1, 1] }}
-                    transition={{ repeat: Infinity, duration: 1.5 }}
-                    className="text-2xl font-bold opacity-50"
-                >
-                    Connecting to Arena...
-                </motion.div>
+    // ── Navbar ──────────────────────────────────────────────────────────────
+    const Navbar = () => (
+        <div className="fixed top-0 left-0 right-0 z-50 px-5 h-14 bg-white/90 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between shadow-sm">
+            <div className="flex items-center gap-2">
+                <div className="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center">
+                    <User className="text-white" size={14} />
+                </div>
+                <span className="font-black text-slate-800 text-sm tracking-wide">{nickname.toUpperCase()}</span>
             </div>
-        );
-    }
-
-    if (status === "ERROR") {
-        return (
-            <div className="flex flex-col items-center justify-center min-vh-100 p-6 text-center">
-                <AlertCircle size={64} className="text-secondary mb-6" />
-                <h1 className="text-3xl font-bold mb-4">Oops!</h1>
-                <p className="text-gray-400 mb-8">{error}</p>
-                <button onClick={() => window.location.href = "/"} className="btn-primary">
-                    Back to Home
+            <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 rounded-full border border-emerald-100">
+                    <Wifi size={10} className="text-emerald-500" />
+                    <span className="text-[10px] font-black text-emerald-600 tracking-widest">{pin}</span>
+                </div>
+                <button
+                    onClick={() => {
+                        if (confirm("Exit the arena? You'll be removed from the game.")) {
+                            socket?.disconnect();
+                            window.location.href = "/";
+                        }
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-full transition-all group"
+                >
+                    <ArrowLeft size={11} className="text-rose-500 group-hover:-translate-x-0.5 transition-transform" />
+                    <span className="text-[10px] font-black text-rose-500 tracking-widest">EXIT</span>
                 </button>
             </div>
+        </div>
+    );
+
+    // ── Spinner / Loading ────────────────────────────────────────────────────
+    const Spinner = ({ title, desc }: { title: string; desc: string }) => (
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-8 text-center">
+            <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg mb-8 animate-bounce">
+                <Zap className="text-indigo-600 fill-indigo-600" size={32} />
+            </div>
+            <h2 className="font-jakarta text-2xl font-black text-slate-900 mb-2">{title}</h2>
+            <p className="text-slate-400 font-bold">{desc}</p>
+        </div>
+    );
+
+    // ── JOINING ──────────────────────────────────────────────────────────────
+    if (status === "JOINING") return <Spinner title="Connecting…" desc="Joining the game session" />;
+
+    // ── ERROR ────────────────────────────────────────────────────────────────
+    if (status === "ERROR") return (
+        <div className="min-h-screen bg-rose-50 flex items-center justify-center p-8">
+            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white rounded-[40px] p-10 max-w-sm w-full text-center shadow-2xl">
+                <div className="w-20 h-20 bg-rose-50 rounded-3xl flex items-center justify-center mx-auto mb-8">
+                    <AlertTriangle size={40} className="text-rose-500" />
+                </div>
+                <h2 className="font-jakarta text-3xl font-black text-slate-900 mb-2">Cannot Join</h2>
+                <p className="text-slate-400 font-bold mb-10 leading-relaxed">{error || "Invalid PIN or game already started."}</p>
+                <button onClick={() => window.location.href = "/"} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black flex items-center justify-center gap-2">
+                    <ArrowLeft size={20} /> GO BACK
+                </button>
+            </motion.div>
+        </div>
+    );
+
+    // ── LOBBY ────────────────────────────────────────────────────────────────
+    if (status === "LOBBY") return (
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-8">
+            <Navbar />
+            <motion.div animate={{ y: [0, -10, 0] }} transition={{ duration: 3, repeat: Infinity }}>
+                <div className="w-24 h-24 bg-white rounded-[32px] flex items-center justify-center shadow-2xl mb-10 relative">
+                    <Zap className="text-indigo-600 fill-indigo-600" size={40} />
+                    <div className="absolute -top-2 -right-2 w-5 h-5 bg-emerald-500 rounded-full border-4 border-slate-50 animate-ping" />
+                </div>
+            </motion.div>
+            <h2 className="font-jakarta text-4xl font-black text-slate-900 mb-2 text-center">You're In! 🎉</h2>
+            <p className="text-indigo-600 font-black text-[10px] uppercase tracking-[4px] mb-6">{quizTitle}</p>
+            <p className="text-slate-400 font-bold text-center mb-10">Waiting for the host to start the game…</p>
+            <div className="flex gap-2">
+                {[0, 1, 2].map(i => (
+                    <motion.div key={i} animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.4 }}
+                        className="w-3 h-3 rounded-full bg-indigo-400" />
+                ))}
+            </div>
+        </div>
+    );
+
+    // ── STARTING ─────────────────────────────────────────────────────────────
+    if (status === "STARTING") return (
+        <div className="min-h-screen bg-indigo-600 flex items-center justify-center text-white">
+            <motion.div initial={{ scale: 0.3, opacity: 0 }} animate={{ scale: 1.4, opacity: 1 }} transition={{ duration: 0.6 }}
+                className="font-jakarta text-[110px] font-black italic tracking-tighter drop-shadow-2xl">
+                GO!
+            </motion.div>
+        </div>
+    );
+
+    // ── QUESTION ─────────────────────────────────────────────────────────────
+    // Players do NOT see the question text — only the answer options / input
+    if (status === "QUESTION" && currentQuestion) {
+        const isTimeLow = timeLeft <= 5;
+        return (
+            <div className="h-screen bg-white flex flex-col overflow-hidden">
+                <Navbar />
+                <div className="flex-1 flex flex-col pt-14 min-h-0">
+                    {/* Timer bar */}
+                    <div className="px-4 pt-4 pb-2">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                Q {currentQuestion.index + 1} / {currentQuestion.total}
+                            </span>
+                            <motion.span
+                                animate={isTimeLow ? { scale: [1, 1.2, 1] } : {}}
+                                transition={{ duration: 0.5, repeat: Infinity }}
+                                className={`text-2xl font-black font-jakarta ${isTimeLow ? "text-rose-500" : "text-slate-800"}`}
+                            >
+                                {timeLeft}s
+                            </motion.span>
+                        </div>
+                        <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden">
+                            <motion.div
+                                initial={{ width: "100%" }}
+                                animate={{ width: `${(timeLeft / currentQuestion.time) * 100}%` }}
+                                transition={{ duration: 1, ease: "linear" }}
+                                className={`h-full rounded-full ${isTimeLow ? "bg-rose-500" : "bg-indigo-600"}`}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Instruction banner */}
+                    <div className="mx-4 mt-3 mb-3 bg-slate-50 border border-slate-100 rounded-2xl px-4 py-2.5 text-center shrink-0">
+                        <p className="text-slate-500 font-bold text-sm">
+                            {currentQuestion.type === "TYPE_ANSWER"
+                                ? "✏️ Type your answer below"
+                                : "👆 Tap the correct answer"
+                            }
+                        </p>
+                    </div>
+
+                    {/* Answer area — fills all remaining space */}
+                    <div className="flex-1 px-4 pb-4 min-h-0">
+                        {currentQuestion.type === "TYPE_ANSWER" ? (
+                            <div className="flex flex-col gap-4 h-full justify-center">
+                                <input
+                                    type="text"
+                                    placeholder="Type your answer…"
+                                    className="w-full bg-slate-50 border-4 border-slate-200 rounded-[28px] px-8 py-6 text-2xl font-black text-slate-900 focus:border-indigo-500 focus:bg-white transition-all outline-none text-center"
+                                    value={answerText}
+                                    autoFocus
+                                    disabled={hasAnswered}
+                                    onChange={(e) => setAnswerText(e.target.value)}
+                                    onKeyDown={(e) => e.key === "Enter" && answerText.trim() && submitAnswer(undefined, answerText)}
+                                />
+                                <button
+                                    onClick={() => answerText.trim() && submitAnswer(undefined, answerText)}
+                                    disabled={!answerText.trim() || hasAnswered}
+                                    className="w-full bg-indigo-600 hover:bg-indigo-700 active:scale-[0.97] text-white py-5 rounded-[28px] font-black text-xl shadow-xl shadow-indigo-200 transition-all disabled:opacity-40 flex items-center justify-center gap-3"
+                                >
+                                    <Send size={20} /> SUBMIT
+                                </button>
+                            </div>
+                        ) : (
+                            <div className={`grid gap-3 h-full ${currentQuestion.type === "TRUE_FALSE" ? "grid-cols-1" : "grid-cols-2"}`}>
+                                {currentQuestion.options.map((opt: string, i: number) => {
+                                    const style = OPTION_STYLES[i];
+                                    const isSelected = selectedIndex === i;
+                                    return (
+                                        <motion.button
+                                            key={i}
+                                            initial={{ opacity: 0, y: 20 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            transition={{ delay: i * 0.08 }}
+                                            onClick={() => !hasAnswered && submitAnswer(i)}
+                                            disabled={hasAnswered}
+                                            className={`
+                                                relative flex flex-col items-center justify-center rounded-[28px] font-jakarta font-black text-white transition-all active:scale-[0.96] shadow-lg
+                                                text-xl
+                                                ${isSelected ? "ring-4 ring-white ring-offset-2 ring-offset-slate-100 scale-[1.02]" : ""}
+                                                ${hasAnswered && !isSelected ? "opacity-50" : ""}
+                                                ${style.bg} ${!hasAnswered ? style.hover : ""}
+                                            `}
+                                        >
+                                            <span className="text-white/60 text-xs font-black tracking-widest mb-2">{style.label}</span>
+                                            <span className="text-center px-4 leading-tight">{opt}</span>
+                                        </motion.button>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
         );
     }
 
-    return (
-        <main className="min-vh-100 p-6 flex flex-col items-center justify-center text-center">
-            {status === "LOBBY" && (
-                <motion.div
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className="flex flex-col items-center gap-8"
-                >
-                    <div className="p-6 bg-accent/20 rounded-full">
-                        <CheckCircle2 size={64} className="text-accent" />
-                    </div>
-                    <div>
-                        <h1 className="text-4xl font-bold mb-2">You're in!</h1>
-                        <p className="text-gray-400 text-lg">See your name on screen?</p>
-                    </div>
-                    <div className="glass p-6 w-full max-w-sm">
-                        <p className="text-sm text-gray-500 uppercase tracking-widest mb-2">Playing as</p>
-                        <p className="text-2xl font-bold">{nickname}</p>
-                    </div>
-                </motion.div>
-            )}
-
-            {status === "STARTING" && (
-                <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="text-6xl font-black title-gradient italic"
-                >
-                    GET READY!
-                </motion.div>
-            )}
-
-            {status === "QUESTION" && currentQuestion && (
-                <div className="w-full flex-1 flex flex-col items-center justify-center gap-6">
-                    {!hasAnswered ? (
-                        <div className="grid grid-cols-2 gap-4 w-full h-full max-w-lg">
-                            {currentQuestion.options.map((_: any, i: number) => (
-                                <button
-                                    key={i}
-                                    onClick={() => submitAnswer(i)}
-                                    className={`glass h-48 text-6xl font-black bg-white/5 hover:bg-white/10 transition-colors border-b-4 ${i === 0 ? 'border-primary' : i === 1 ? 'border-secondary' : i === 2 ? 'border-accent' : 'border-warning'
-                                        }`}
-                                >
-                                    {i === 0 ? '▲' : i === 1 ? '◆' : i === 2 ? '●' : '■'}
-                                </button>
-                            ))}
-                        </div>
-                    ) : (
-                        <motion.div
-                            initial={{ scale: 0.8, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            className={`w-full max-w-lg h-96 flex flex-col items-center justify-center rounded-3xl ${feedback === "CORRECT" ? 'bg-accent/20 border-accent' : 'bg-secondary/20 border-secondary'
-                                } border-4`}
-                        >
-                            <h2 className="text-5xl font-black mb-4">
-                                {feedback === "CORRECT" ? "CORRECT!" : "INCORRECT"}
-                            </h2>
-                            <div className="p-4 bg-white/10 rounded-full animate-pulse">
-                                {feedback === "CORRECT" ? "🎉" : "😢"}
-                            </div>
-                            <p className="mt-8 text-xl font-bold opacity-50">Waiting for others...</p>
-                        </motion.div>
-                    )}
+    // ── ANSWERED ─────────────────────────────────────────────────────────────
+    if (status === "ANSWERED") return (
+        <div className={`min-h-screen flex flex-col items-center justify-center p-8 ${feedback === "CORRECT" ? "bg-emerald-50" : "bg-rose-50"}`}>
+            <Navbar />
+            <motion.div
+                initial={{ scale: 0.7, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: "spring", stiffness: 260, damping: 20 }}
+                className="bg-white rounded-[48px] p-10 w-full max-w-sm text-center shadow-2xl border border-slate-100"
+            >
+                <div className={`w-20 h-20 rounded-[28px] flex items-center justify-center mx-auto mb-6 ${feedback === "CORRECT" ? "bg-emerald-100" : "bg-rose-100"}`}>
+                    {feedback === "CORRECT"
+                        ? <CheckCircle2 size={48} className="text-emerald-500" />
+                        : <XCircle size={48} className="text-rose-500" />
+                    }
                 </div>
-            )}
 
-            {status === "RESULTS" && (
-                <div className="flex-1 flex flex-col items-center justify-center">
-                    <div className="glass p-8 rounded-3xl animate-pulse">
-                        <h2 className="text-3xl font-bold italic title-gradient">CHECK THE SCREEN!</h2>
-                    </div>
+                <h2 className={`font-jakarta text-4xl font-black mb-2 ${feedback === "CORRECT" ? "text-emerald-600" : "text-rose-600"}`}>
+                    {feedback === "CORRECT" ? "CORRECT!" : "WRONG!"}
+                </h2>
+
+                {feedback === "CORRECT" && pointsEarned > 0 && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.3 }}
+                        className="mt-4 bg-emerald-500 text-white rounded-2xl px-8 py-4 inline-block"
+                    >
+                        <span className="font-black text-3xl font-jakarta">+{pointsEarned}</span>
+                        <p className="text-[10px] font-black tracking-widest mt-0.5 text-emerald-100">POINTS EARNED</p>
+                    </motion.div>
+                )}
+
+                {feedback === "INCORRECT" && (
+                    <p className="text-slate-400 font-bold text-sm mt-4">Better luck on the next one!</p>
+                )}
+
+                <div className="mt-8 pt-6 border-t border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Your Total Score</p>
+                    <p className="font-jakarta font-black text-3xl text-slate-800">{totalScore}</p>
                 </div>
-            )}
-        </main>
+
+                <div className="flex justify-center gap-2 mt-8">
+                    {[0, 1, 2].map(i => (
+                        <motion.div key={i} animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.4 }}
+                            className="w-2 h-2 rounded-full bg-slate-300" />
+                    ))}
+                </div>
+                <p className="text-slate-400 font-bold text-xs mt-3">Waiting for next question…</p>
+            </motion.div>
+        </div>
     );
+
+    // ── SESSION ENDED BY HOST – auto-redirects to home ─────────────────────
+    if (status === "SESSION_ENDED") return (
+        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-8 text-center">
+            <motion.div
+                initial={{ scale: 0.85, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                transition={{ type: "spring", stiffness: 220, damping: 22 }}
+                className="bg-white rounded-[48px] p-10 w-full max-w-xs shadow-2xl"
+            >
+                <motion.div
+                    animate={{ rotate: [0, -10, 10, -10, 0] }}
+                    transition={{ duration: 0.6, delay: 0.3 }}
+                    className="text-5xl mb-6"
+                >
+                    🚪
+                </motion.div>
+                <h2 className="font-jakarta text-2xl font-black text-slate-900 mb-2">Session Ended</h2>
+                <p className="text-slate-400 font-bold text-sm mb-1">The host closed this arena.</p>
+                <p className="text-indigo-500 font-black text-xs mt-4 animate-pulse">Redirecting to home…</p>
+            </motion.div>
+        </div>
+    );
+
+    // ── WAITING (between questions or after game ends) ────────────────────────
+    if (status === "WAITING") return (
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-8 text-center">
+            <Navbar />
+            <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg mb-6 animate-pulse">
+                <Clock className="text-indigo-600" size={32} />
+            </div>
+            <h2 className="font-jakarta text-2xl font-black text-slate-900 mb-2">Hang tight…</h2>
+            <p className="text-slate-400 font-bold">The host is preparing the next question</p>
+            <div className="flex gap-2 mt-6">
+                {[0, 1, 2].map(i => (
+                    <motion.div key={i} animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.4 }}
+                        className="w-2.5 h-2.5 rounded-full bg-indigo-300" />
+                ))}
+            </div>
+        </div>
+    );
+
+    // Fallback
+    return <Spinner title="Session Complete" desc="Check the host screen for final rankings." />;
 }
