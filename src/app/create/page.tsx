@@ -152,7 +152,7 @@ export default function CreateQuiz() {
         setQuestions(newQuestions);
     };
 
-    const handleSave = () => {
+     const handleSave = () => {
         if (isSaving) return;
         setIsSaving(true);
         
@@ -165,8 +165,34 @@ export default function CreateQuiz() {
             questionsCount: questions.length 
         };
         
-        // Use Global Intelligence (Server) instead of local memory (LocalStorage)
-        socket.emit("save-to-library", newQuiz);
+        // Save to localStorage immediately as a fallback and local storage cache
+        try {
+            let localLib: any[] = [];
+            const stored = localStorage.getItem("quizarc_library");
+            if (stored) {
+                localLib = JSON.parse(stored);
+            }
+            const existingIndex = localLib.findIndex((q: any) => q.id === id);
+            if (existingIndex > -1) {
+                localLib[existingIndex] = newQuiz;
+            } else {
+                localLib.unshift(newQuiz);
+            }
+            localStorage.setItem("quizarc_library", JSON.stringify(localLib));
+        } catch (e) {
+            console.error("Failed to save to local library", e);
+        }
+        
+        // Emitting through socket if active
+        if (socket && socket.connected) {
+            socket.emit("save-to-library", newQuiz);
+        } else {
+            // Local fallback for Vercel/serverless environments
+            setTimeout(() => {
+                setIsSaving(false);
+                router.push("/?tab=library");
+            }, 800);
+        }
     };
 
     const handleAiGenerate = async () => {

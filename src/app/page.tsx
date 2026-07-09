@@ -23,10 +23,23 @@ export default function Home() {
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
 
     useEffect(() => {
+        // Load from localStorage immediately as fallback
+        try {
+            const stored = localStorage.getItem("quizarc_library");
+            if (stored) {
+                setLibrary(JSON.parse(stored));
+            }
+        } catch (e) {
+            console.error("Failed to load local library", e);
+        }
+
         socket = io();
 
         socket.on("library-data", (data) => {
             setLibrary(data);
+            try {
+                localStorage.setItem("quizarc_library", JSON.stringify(data));
+            } catch (e) {}
         });
 
         socket.emit("get-library");
@@ -47,8 +60,23 @@ export default function Home() {
 
     const deleteQuiz = (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
-        if (confirm("Permanently remove this arena from the server?")) {
-            socket.emit("delete-from-library", id);
+        if (confirm("Permanently remove this arena?")) {
+            // Delete from local storage immediately
+            try {
+                const stored = localStorage.getItem("quizarc_library");
+                if (stored) {
+                    const localLib = JSON.parse(stored);
+                    const updated = localLib.filter((q: any) => q.id !== id);
+                    localStorage.setItem("quizarc_library", JSON.stringify(updated));
+                    if (!socket.connected) {
+                        setLibrary(updated);
+                    }
+                }
+            } catch (e) {}
+
+            if (socket && socket.connected) {
+                socket.emit("delete-from-library", id);
+            }
         }
     };
 
@@ -372,9 +400,13 @@ export default function Home() {
                                                                         e.stopPropagation();
                                                                         const newName = prompt("Enter new title for this arena:", quiz.title);
                                                                         if (newName && newName !== quiz.title) {
-                                                                            const updated = library.map(q => q.id === quiz.id ? { ...q, title: newName } : q);
+                                                                            const updatedQuiz = { ...quiz, title: newName };
+                                                                            const updated = library.map(q => q.id === quiz.id ? updatedQuiz : q);
                                                                             setLibrary(updated);
                                                                             localStorage.setItem("quizarc_library", JSON.stringify(updated));
+                                                                            if (socket && socket.connected) {
+                                                                                socket.emit("save-to-library", updatedQuiz);
+                                                                            }
                                                                         }
                                                                         setActiveMenu(null);
                                                                     }}
