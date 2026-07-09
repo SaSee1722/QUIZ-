@@ -37,11 +37,20 @@ export default function HostPage() {
     const [correctAnswer, setCorrectAnswer] = useState<any>(null);
     const [answerCounts, setAnswerCounts] = useState<any>(null);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const [connectionError, setConnectionError] = useState<string | null>(null);
 
     useEffect(() => {
-        socket = io();
+        socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || undefined);
+
+        const connTimeout = setTimeout(() => {
+            if (!socket.connected) {
+                setConnectionError("Failed to connect to the real-time server. Please ensure the backend is running and NEXT_PUBLIC_SOCKET_URL is set correctly.");
+            }
+        }, 5000);
 
         socket.on("connect", () => {
+            clearTimeout(connTimeout);
+            setConnectionError(null);
             const targetQuizRaw = typeof window !== "undefined" ? localStorage.getItem("host_target_quiz") : null;
             const legacyQuizRaw = typeof window !== "undefined" ? localStorage.getItem("custom_quiz") : null;
 
@@ -57,6 +66,11 @@ export default function HostPage() {
                 setCustomQuiz(initialData);
                 setSelectedCategory("custom");
             }
+        });
+
+        socket.on("connect_error", () => {
+            clearTimeout(connTimeout);
+            setConnectionError("Connection error. The WebSocket server at " + (process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin) + " could not be reached.");
         });
 
         socket.on("lobby-created", ({ pin, categories }: any) => {
@@ -118,7 +132,25 @@ export default function HostPage() {
         }
     };
 
-    // ── Loading ──────────────────────────────────────────────────────────────
+    // ── Loading & Error ──────────────────────────────────────────────────────
+    if (connectionError) return (
+        <div className="min-h-screen bg-white flex items-center justify-center p-6">
+            <div className="text-center max-w-md">
+                <div className="w-16 h-16 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <AlertTriangle className="text-rose-600" size={32} />
+                </div>
+                <h2 className="font-jakarta text-2xl font-black text-slate-900 mb-2">Connection Failed</h2>
+                <p className="text-slate-500 font-medium leading-relaxed mb-8">{connectionError}</p>
+                <button
+                    onClick={() => router.push("/?tab=library")}
+                    className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-2xl font-bold text-xs transition-all cursor-pointer shadow-lg"
+                >
+                    BACK TO START
+                </button>
+            </div>
+        </div>
+    );
+
     if (!pin) return (
         <div className="min-h-screen bg-white flex items-center justify-center">
             <div className="text-center">

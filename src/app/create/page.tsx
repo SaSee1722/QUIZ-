@@ -56,7 +56,7 @@ export default function CreateQuiz() {
     const [previewSubmitted, setPreviewSubmitted] = useState(false);
 
     useEffect(() => {
-        socket = io();
+        socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || undefined);
         
         socket.on("save-success", () => {
             setIsSaving(false);

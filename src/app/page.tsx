@@ -33,7 +33,7 @@ export default function Home() {
             console.error("Failed to load local library", e);
         }
 
-        socket = io();
+        socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || undefined);
 
         socket.on("library-data", (data) => {
             setLibrary(data);

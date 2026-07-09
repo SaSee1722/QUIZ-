@@ -23,7 +23,12 @@ app.prepare().then(() => {
         handle(req, res, parsedUrl);
     });
 
-    const io = new Server(httpServer);
+    const io = new Server(httpServer, {
+        cors: {
+            origin: "*",
+            methods: ["GET", "POST"]
+        }
+    });
 
     // Game state (in-memory)
     const lobbies = new Map();

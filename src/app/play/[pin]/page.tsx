@@ -36,11 +36,27 @@ export default function PlayerPage({ params }: { params: Promise<{ pin: string }
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     useEffect(() => {
-        socket = io();
+        socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || undefined);
+
+        const connTimeout = setTimeout(() => {
+            if (!socket.connected) {
+                setStatus("ERROR");
+                setError("Failed to connect to the real-time server. Please ensure the backend is running and NEXT_PUBLIC_SOCKET_URL is set correctly.");
+            }
+        }, 5000);
+
         socket.on("connect", () => {
+            clearTimeout(connTimeout);
             console.log("Connected to socket, joining PIN:", pin);
             socket.emit("join-lobby", { pin, nickname });
         });
+
+        socket.on("connect_error", () => {
+            clearTimeout(connTimeout);
+            setStatus("ERROR");
+            setError("Connection error. The WebSocket server at " + (process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin) + " could not be reached.");
+        });
+
         socket.on("join-success", (data) => {
             setStatus("LOBBY");
             setQuizTitle(data.quizTitle || "Quiz Arena");
