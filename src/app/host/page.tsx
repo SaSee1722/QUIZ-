@@ -15,6 +15,8 @@ const OPTION_COLORS = [
     "from-orange-500 to-orange-600",
 ];
 
+const OPTION_LABELS = ["A", "B", "C", "D"];
+
 const RANK_BADGE: Record<number, { bg: string; text: string; icon: React.ReactNode }> = {
     0: { bg: "bg-amber-400", text: "text-amber-900", icon: <Crown size={18} className="fill-amber-900" /> },
     1: { bg: "bg-slate-300", text: "text-slate-700", icon: <Medal size={18} className="fill-slate-600" /> },
@@ -32,6 +34,8 @@ export default function HostPage() {
     const [selectedCategory, setSelectedCategory] = useState<string>("dsa");
     const [customQuiz, setCustomQuiz] = useState<any>(null);
     const [timeLeft, setTimeLeft] = useState<number>(0);
+    const [correctAnswer, setCorrectAnswer] = useState<any>(null);
+    const [answerCounts, setAnswerCounts] = useState<any>(null);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     useEffect(() => {
@@ -68,6 +72,8 @@ export default function HostPage() {
             setCurrentQuestion(questionData);
             setAnswerCount(0);
             setTimeLeft(questionData.time);
+            setCorrectAnswer(null);
+            setAnswerCounts(null);
 
             if (timerRef.current) clearInterval(timerRef.current);
             timerRef.current = setInterval(() => {
@@ -83,9 +89,10 @@ export default function HostPage() {
         });
 
         socket.on("question-results", (resultsData: any) => {
-            // Between questions: just update scores quietly, show brief "next up" screen
             setGameState("BETWEEN");
             setPlayers(resultsData.players);
+            setCorrectAnswer(resultsData.correctAnswer);
+            setAnswerCounts(resultsData.answerCounts);
             if (timerRef.current) clearInterval(timerRef.current);
         });
 
@@ -102,6 +109,7 @@ export default function HostPage() {
     }, []);
 
     const handleStartGame = () => { if (pin) socket.emit("start-game", pin); };
+    const handleNextQuestion = () => { if (pin) socket.emit("next-question", pin); };
 
     const handleSelectCategory = (id: string) => {
         if (pin) {
@@ -131,7 +139,7 @@ export default function HostPage() {
                     <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center shadow-lg">
                         <Zap className="text-white fill-white" size={20} />
                     </div>
-                    <span className="font-jakarta text-xl font-black tracking-tight text-slate-900 uppercase">PHYJAX FORGE</span>
+                    <span className="font-jakarta text-xl font-black tracking-tight text-slate-900">QuizArc Forge</span>
                 </button>
                 <div className="flex items-center gap-6">
                     <button
@@ -345,24 +353,189 @@ export default function HostPage() {
         );
     }
 
-    // ── BETWEEN QUESTIONS ────────────────────────────────────────────────────
-    if (gameState === "BETWEEN") return (
-        <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white">
-            <div className="text-center">
-                <div className="w-20 h-20 bg-white/10 rounded-[28px] flex items-center justify-center mx-auto mb-8 animate-pulse">
-                    <Clock className="text-indigo-400" size={36} />
+    // ── BETWEEN QUESTIONS (Question Results View) ────────────────────────────
+    if (gameState === "BETWEEN" && currentQuestion) {
+        const isLastQuestion = currentQuestion.index + 1 === currentQuestion.total;
+        
+        // Sum all option answers (for multiple choice) or use the sum of correct + incorrect (for typed answers)
+        const totalResponses = answerCounts 
+            ? (Array.isArray(answerCounts) 
+                ? answerCounts.reduce((a: number, b: number) => a + b, 0) 
+                : ((answerCounts.correct || 0) + (answerCounts.incorrect || 0)))
+            : 0;
+
+        return (
+            <div className="min-h-screen bg-slate-950 flex flex-col text-white">
+                {/* Top header bar */}
+                <div className="px-10 py-6 flex items-center justify-between border-b border-white/5 sticky top-0 bg-slate-950/80 backdrop-blur-xl z-50">
+                    <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-indigo-600/20 rounded-xl flex items-center justify-center border border-indigo-500/25">
+                            <Zap className="text-indigo-400 fill-indigo-400" size={20} />
+                        </div>
+                        <div>
+                            <p className="text-[10px] font-black tracking-widest text-indigo-400">QUESTION RESULTS</p>
+                            <h3 className="font-jakarta font-black text-lg">
+                                {currentQuestion.index + 1} <span className="text-white/30">/ {currentQuestion.total}</span>
+                            </h3>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-6">
+                        <div className="text-right hidden sm:block">
+                            <p className="text-[10px] font-black tracking-widest text-slate-500">TOTAL RESPONSES</p>
+                            <p className="font-jakarta font-black text-2xl">
+                                {totalResponses} <span className="text-white/30 text-sm">/ {players.length}</span>
+                            </p>
+                        </div>
+                        <button
+                            onClick={handleNextQuestion}
+                            className="group inline-flex items-center justify-center gap-3 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white px-8 py-4 rounded-2xl font-black text-base shadow-xl transition-all shadow-indigo-500/20"
+                        >
+                            {isLastQuestion ? "Show Final Standings" : "Next Question"}
+                            <ChevronRight size={18} className="group-hover:translate-x-0.5 transition-transform" />
+                        </button>
+                    </div>
                 </div>
-                <h2 className="font-jakarta text-4xl font-black mb-3">Preparing next question…</h2>
-                <p className="text-slate-500 font-bold">Results will appear here at the end</p>
-                <div className="flex justify-center gap-2 mt-8">
-                    {[0, 1, 2].map(i => (
-                        <motion.div key={i} animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.4 }}
-                            className="w-3 h-3 rounded-full bg-indigo-500" />
-                    ))}
+
+                {/* Main Results View */}
+                <div className="flex-1 flex flex-col max-w-5xl mx-auto w-full px-8 py-10">
+                    {/* Question Card */}
+                    <div className="bg-white/5 border border-white/10 rounded-[32px] p-8 mb-8 flex-shrink-0">
+                        <div className="flex flex-col md:flex-row gap-6 items-center">
+                            {currentQuestion.image && (
+                                <div className="w-full md:w-1/3 aspect-video bg-white/5 rounded-2xl overflow-hidden border border-white/10 shrink-0">
+                                    <img src={currentQuestion.image} alt="Question" className="w-full h-full object-contain" />
+                                </div>
+                            )}
+                            <div className="flex-1 text-center md:text-left">
+                                <p className="text-[10px] font-black tracking-widest text-indigo-400 mb-2 uppercase">
+                                    {currentQuestion.type === "TYPE_ANSWER" ? "Type Answer" : currentQuestion.type === "TRUE_FALSE" ? "True / False" : "Multiple Choice"}
+                                </p>
+                                <h1 className="font-jakarta text-3xl font-black leading-tight tracking-tight">
+                                    {currentQuestion.question}
+                                </h1>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Chart / Options Distribution */}
+                    <div className="flex-1">
+                        {currentQuestion.type === "TYPE_ANSWER" ? (
+                            <div className="flex flex-col gap-6">
+                                {/* Correct answer card */}
+                                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-[32px] p-8 text-center shadow-[0_0_50px_rgba(16,185,129,0.05)]">
+                                    <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-2">CORRECT ANSWER</p>
+                                    <h3 className="font-jakarta text-3xl md:text-4xl font-black text-emerald-400 tracking-tight leading-none">
+                                        {Array.isArray(correctAnswer) ? correctAnswer.join(" / ") : correctAnswer}
+                                    </h3>
+                                </div>
+
+                                {/* Correct vs Incorrect breakdown */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
+                                    <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-[28px] p-6 text-center">
+                                        <span className="bg-emerald-500/20 text-emerald-400 text-[10px] font-black tracking-widest px-3 py-1 rounded-full">
+                                            CORRECT
+                                        </span>
+                                        <h4 className="font-jakarta text-[54px] font-black text-emerald-400 mt-2 leading-none">
+                                            {answerCounts?.correct || 0}
+                                        </h4>
+                                        <p className="text-slate-500 font-bold text-sm mt-1">players got it right</p>
+                                    </div>
+                                    <div className="bg-rose-500/5 border border-rose-500/10 rounded-[28px] p-6 text-center">
+                                        <span className="bg-rose-500/20 text-rose-400 text-[10px] font-black tracking-widest px-3 py-1 rounded-full">
+                                            INCORRECT
+                                        </span>
+                                        <h4 className="font-jakarta text-[54px] font-black text-rose-400 mt-2 leading-none">
+                                            {answerCounts?.incorrect || 0}
+                                        </h4>
+                                        <p className="text-slate-500 font-bold text-sm mt-1">players got it wrong</p>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className={`grid gap-5 mb-8 ${currentQuestion.type === "TRUE_FALSE" ? "grid-cols-2" : "grid-cols-2"}`}>
+                                {currentQuestion.options.map((opt: string, i: number) => {
+                                    const isCorrect = correctAnswer === i;
+                                    const count = answerCounts ? (answerCounts[i] || 0) : 0;
+                                    const pct = totalResponses > 0 ? (count / totalResponses) * 100 : 0;
+                                    
+                                    return (
+                                        <motion.div
+                                            key={i}
+                                            initial={{ opacity: 0, scale: 0.95 }}
+                                            animate={{ opacity: 1, scale: 1 }}
+                                            transition={{ delay: i * 0.08 }}
+                                            className={`relative overflow-hidden rounded-[28px] p-6 border transition-all duration-300 flex flex-col justify-between min-h-[140px] z-10
+                                                ${isCorrect 
+                                                    ? "bg-emerald-500/10 border-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.15)] text-white" 
+                                                    : "bg-white/5 border-white/10 text-white/60"
+                                                }`}
+                                        >
+                                            {/* Progress fill background */}
+                                            <motion.div 
+                                                initial={{ width: 0 }}
+                                                animate={{ width: `${pct}%` }}
+                                                transition={{ duration: 0.8, ease: "easeOut" }}
+                                                className={`absolute inset-y-0 left-0 -z-10
+                                                    ${isCorrect ? "bg-emerald-500/10" : "bg-white/[0.03]"}`}
+                                            />
+
+                                            <div className="flex items-start justify-between z-10">
+                                                <span className={`text-xs font-black tracking-widest px-2.5 py-0.5 rounded-md
+                                                    ${isCorrect ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/20" : "bg-white/10 text-white/40 border border-white/10"}`}>
+                                                    {OPTION_LABELS[i] || String.fromCharCode(65 + i)}
+                                                </span>
+                                                {isCorrect && (
+                                                    <span className="bg-emerald-500 text-slate-950 text-[10px] font-black tracking-widest px-3 py-1 rounded-full flex items-center gap-1 shadow-lg shadow-emerald-500/20">
+                                                        <CheckCircle size={10} className="fill-slate-950" /> CORRECT
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            <div className="mt-4 font-jakarta text-2xl font-black leading-snug z-10">
+                                                {opt}
+                                            </div>
+
+                                            <div className="mt-4 flex items-center justify-between z-10 border-t border-white/5 pt-3">
+                                                <span className="text-xs font-bold text-slate-400">
+                                                    {count} response{count !== 1 ? "s" : ""}
+                                                </span>
+                                                <span className="font-jakarta font-black text-lg">
+                                                    {Math.round(pct)}%
+                                                </span>
+                                            </div>
+                                        </motion.div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Mini scoreboard standings ticker at the bottom */}
+                    {players.length > 0 && (
+                        <div className="bg-white/5 border border-white/10 rounded-[28px] p-6 flex flex-col md:flex-row items-center justify-between gap-4 mt-auto">
+                            <div className="flex items-center gap-3">
+                                <Crown size={20} className="text-amber-400" />
+                                <span className="font-jakarta text-base font-black text-slate-200 uppercase tracking-wider">Lobby Standings</span>
+                            </div>
+                            <div className="flex flex-wrap gap-4 items-center justify-center">
+                                {players.slice(0, 3).map((player, idx) => (
+                                    <div key={player.id} className="flex items-center gap-2 bg-white/5 px-4 py-2 rounded-xl border border-white/5">
+                                        <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-xs
+                                            ${idx === 0 ? "bg-amber-400 text-amber-950" : idx === 1 ? "bg-slate-300 text-slate-800" : "bg-orange-400 text-orange-950"}`}>
+                                            {idx + 1}
+                                        </span>
+                                        <span className="font-bold text-slate-300 text-sm truncate max-w-[100px]">{player.nickname}</span>
+                                        <span className="font-black text-indigo-400 text-sm ml-1 shrink-0">{player.score} pts</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
-        </div>
-    );
+        );
+    }
 
     // ── FINISHED (Full Leaderboard) ──────────────────────────────────────────
     return (

@@ -32,6 +32,7 @@ export default function PlayerPage({ params }: { params: Promise<{ pin: string }
     const [answerText, setAnswerText] = useState("");
     const [quizTitle, setQuizTitle] = useState("");
     const [timeLeft, setTimeLeft] = useState<number>(0);
+    const [playerRank, setPlayerRank] = useState<{ rank: number; totalPlayers: number; score: number } | null>(null);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     useEffect(() => {
@@ -57,6 +58,7 @@ export default function PlayerPage({ params }: { params: Promise<{ pin: string }
             setHasAnswered(false);
             setAnswerText("");
             setTimeLeft(q.time);
+            setPlayerRank(null);
 
             // Start live countdown
             if (timerRef.current) clearInterval(timerRef.current);
@@ -80,8 +82,15 @@ export default function PlayerPage({ params }: { params: Promise<{ pin: string }
         });
         // After each question results phase, server will send next question or game-over
         // Show a "waiting" state between ANSWERED and next question
-        socket.on("question-results", () => {
+        socket.on("question-results", (data) => {
             setStatus("WAITING");
+            if (data && data.rank) {
+                setPlayerRank({
+                    rank: data.rank,
+                    totalPlayers: data.totalPlayers,
+                    score: data.score
+                });
+            }
             if (timerRef.current) clearInterval(timerRef.current);
         });
         socket.on("game-over", () => {
@@ -306,7 +315,7 @@ export default function PlayerPage({ params }: { params: Promise<{ pin: string }
 
     // ── ANSWERED ─────────────────────────────────────────────────────────────
     if (status === "ANSWERED") return (
-        <div className={`min-h-screen flex flex-col items-center justify-center p-8 ${feedback === "CORRECT" ? "bg-emerald-50" : "bg-rose-50"}`}>
+        <div className="min-h-screen flex flex-col items-center justify-center p-8 bg-slate-50">
             <Navbar />
             <motion.div
                 initial={{ scale: 0.7, opacity: 0 }}
@@ -314,37 +323,34 @@ export default function PlayerPage({ params }: { params: Promise<{ pin: string }
                 transition={{ type: "spring", stiffness: 260, damping: 20 }}
                 className="bg-white rounded-[48px] p-10 w-full max-w-sm text-center shadow-2xl border border-slate-100"
             >
-                <div className={`w-20 h-20 rounded-[28px] flex items-center justify-center mx-auto mb-6 ${feedback === "CORRECT" ? "bg-emerald-100" : "bg-rose-100"}`}>
-                    {feedback === "CORRECT"
-                        ? <CheckCircle2 size={48} className="text-emerald-500" />
-                        : <XCircle size={48} className="text-rose-500" />
-                    }
+                <div className="w-20 h-20 rounded-[28px] bg-indigo-50 flex items-center justify-center mx-auto mb-6">
+                    <CheckCircle2 size={48} className="text-indigo-500 animate-pulse" />
                 </div>
 
-                <h2 className={`font-jakarta text-4xl font-black mb-2 ${feedback === "CORRECT" ? "text-emerald-600" : "text-rose-600"}`}>
-                    {feedback === "CORRECT" ? "CORRECT!" : "WRONG!"}
+                <h2 className="font-jakarta text-3xl font-black mb-2 text-slate-800 leading-tight">
+                    ANSWER SUBMITTED!
                 </h2>
+                <p className="text-slate-400 font-bold text-sm mb-4">
+                    Your answer has been locked in. Let's see the results when the question ends!
+                </p>
 
-                {feedback === "CORRECT" && pointsEarned > 0 && (
-                    <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.3 }}
-                        className="mt-4 bg-emerald-500 text-white rounded-2xl px-8 py-4 inline-block"
-                    >
-                        <span className="font-black text-3xl font-jakarta">+{pointsEarned}</span>
-                        <p className="text-[10px] font-black tracking-widest mt-0.5 text-emerald-100">POINTS EARNED</p>
-                    </motion.div>
+                {selectedIndex !== null && currentQuestion && currentQuestion.options && (
+                    <div className="mt-4 bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 inline-block max-w-full">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Your Selection</p>
+                        <span className="font-bold text-slate-700 text-base block truncate">
+                            {OPTION_STYLES[selectedIndex]?.label}. {currentQuestion.options[selectedIndex]}
+                        </span>
+                    </div>
                 )}
 
-                {feedback === "INCORRECT" && (
-                    <p className="text-slate-400 font-bold text-sm mt-4">Better luck on the next one!</p>
+                {answerText && (
+                    <div className="mt-4 bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 inline-block max-w-full">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Your Typed Answer</p>
+                        <span className="font-bold text-slate-700 text-base block truncate">
+                            "{answerText}"
+                        </span>
+                    </div>
                 )}
-
-                <div className="mt-8 pt-6 border-t border-slate-100">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Your Total Score</p>
-                    <p className="font-jakarta font-black text-3xl text-slate-800">{totalScore}</p>
-                </div>
 
                 <div className="flex justify-center gap-2 mt-8">
                     {[0, 1, 2].map(i => (
@@ -352,7 +358,7 @@ export default function PlayerPage({ params }: { params: Promise<{ pin: string }
                             className="w-2 h-2 rounded-full bg-slate-300" />
                     ))}
                 </div>
-                <p className="text-slate-400 font-bold text-xs mt-3">Waiting for next question…</p>
+                <p className="text-slate-400 font-bold text-xs mt-3">Waiting for question to end…</p>
             </motion.div>
         </div>
     );
@@ -381,22 +387,89 @@ export default function PlayerPage({ params }: { params: Promise<{ pin: string }
     );
 
     // ── WAITING (between questions or after game ends) ────────────────────────
-    if (status === "WAITING") return (
-        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-8 text-center">
-            <Navbar />
-            <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg mb-6 animate-pulse">
-                <Clock className="text-indigo-600" size={32} />
+    if (status === "WAITING") {
+        if (playerRank) {
+            let heading = "KEEP PUSHING! 🚀";
+            let badgeColor = "bg-slate-100 text-slate-700 border-slate-200";
+            let borderGlow = "border-slate-200";
+            
+            if (playerRank.rank === 1) {
+                heading = "👑 YOU ARE AT THE TOP!";
+                badgeColor = "bg-amber-100 text-amber-800 border-amber-200";
+                borderGlow = "border-amber-300 shadow-[0_0_30px_rgba(251,191,36,0.15)]";
+            } else if (playerRank.rank <= 3) {
+                heading = "🔥 YOU ARE IN THE TOP 3!";
+                badgeColor = "bg-indigo-100 text-indigo-800 border-indigo-200";
+                borderGlow = "border-indigo-200 shadow-[0_0_30px_rgba(99,102,241,0.15)]";
+            } else if (playerRank.rank <= 5) {
+                heading = "⚡ YOU ARE IN THE TOP 5!";
+                badgeColor = "bg-emerald-100 text-emerald-800 border-emerald-200";
+                borderGlow = "border-emerald-200 shadow-[0_0_30px_rgba(16,185,129,0.15)]";
+            }
+
+            return (
+                <div className="min-h-screen bg-slate-50 flex items-center justify-center p-8">
+                    <Navbar />
+                    <motion.div
+                        initial={{ scale: 0.85, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ type: "spring", stiffness: 220, damping: 20 }}
+                        className={`bg-white rounded-[48px] p-10 w-full max-w-sm text-center shadow-2xl border ${borderGlow}`}
+                    >
+                        <span className={`inline-flex items-center gap-1 px-4 py-1.5 rounded-full text-xs font-black tracking-widest border mb-6 ${badgeColor}`}>
+                            RANK #{playerRank.rank}
+                        </span>
+
+                        <h2 className="font-jakarta text-3xl font-black mb-3 text-slate-800 leading-tight">
+                            {heading}
+                        </h2>
+
+                        <div className="my-8 py-6 border-t border-b border-slate-100">
+                            <div className="grid grid-cols-2 gap-4 divide-x divide-slate-100">
+                                <div>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Your Standing</p>
+                                    <p className="font-jakarta font-black text-3xl text-slate-800">
+                                        {playerRank.rank} <span className="text-slate-400 text-lg">/ {playerRank.totalPlayers}</span>
+                                    </p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Score</p>
+                                    <p className="font-jakarta font-black text-3xl text-slate-800">
+                                        {playerRank.score}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-center gap-2 mb-3">
+                            {[0, 1, 2].map(i => (
+                                <motion.div key={i} animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.4 }}
+                                    className="w-2.5 h-2.5 rounded-full bg-indigo-400" />
+                            ))}
+                        </div>
+                        <p className="text-slate-400 font-bold text-xs">Waiting for host to advance…</p>
+                    </motion.div>
+                </div>
+            );
+        }
+
+        return (
+            <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-8 text-center">
+                <Navbar />
+                <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg mb-6 animate-pulse">
+                    <Clock className="text-indigo-600" size={32} />
+                </div>
+                <h2 className="font-jakarta text-2xl font-black text-slate-900 mb-2">Hang tight…</h2>
+                <p className="text-slate-400 font-bold">The host is preparing the next question</p>
+                <div className="flex gap-2 mt-6">
+                    {[0, 1, 2].map(i => (
+                        <motion.div key={i} animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.4 }}
+                            className="w-2.5 h-2.5 rounded-full bg-indigo-300" />
+                    ))}
+                </div>
             </div>
-            <h2 className="font-jakarta text-2xl font-black text-slate-900 mb-2">Hang tight…</h2>
-            <p className="text-slate-400 font-bold">The host is preparing the next question</p>
-            <div className="flex gap-2 mt-6">
-                {[0, 1, 2].map(i => (
-                    <motion.div key={i} animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.4 }}
-                        className="w-2.5 h-2.5 rounded-full bg-indigo-300" />
-                ))}
-            </div>
-        </div>
-    );
+        );
+    }
 
     // Fallback
     return <Spinner title="Session Complete" desc="Check the host screen for final rankings." />;

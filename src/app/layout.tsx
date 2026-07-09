@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-    title: "PHYJAX | CSE Stream Event",
+    title: "QuizArc | CSE Stream Event",
     description: "The ultimate real-time quiz platform for CSE stream challenges and technical events.",
 };
 

@@ -216,34 +216,46 @@ app.prepare().then(() => {
             lobby.state = "RESULTS";
             const sortedPlayers = lobby.players.sort((a, b) => b.score - a.score);
 
+            const question = lobby.quiz.questions[lobby.currentQuestion];
+            const answerCounts = new Array(question.options ? question.options.length : 0).fill(0);
+            let correctTypeCount = 0;
+            let incorrectTypeCount = 0;
+
+            lobby.answers.forEach((ansVal) => {
+                if (question.type === "TYPE_ANSWER") {
+                    if (ansVal.isCorrect) {
+                        correctTypeCount++;
+                    } else {
+                        incorrectTypeCount++;
+                    }
+                } else {
+                    const idx = ansVal.answer;
+                    if (idx >= 0 && idx < answerCounts.length) {
+                        answerCounts[idx]++;
+                    }
+                }
+            });
+
             // Send results to HOST only (so they see the "between questions" screen)
             io.to(lobby.host).emit("question-results", {
-                players: sortedPlayers
+                players: sortedPlayers,
+                correctAnswer: question.answer,
+                answerCounts: question.type === "TYPE_ANSWER" 
+                    ? { correct: correctTypeCount, incorrect: incorrectTypeCount } 
+                    : answerCounts
             });
 
-            // Send waiting signal to all players (host already got question-results)
+            // Send specific rank & score details to each player
             lobby.players.forEach(p => {
                 if (p.id !== lobby.host) {
-                    io.to(p.id).emit("question-results", {});
-                }
-            });
-
-            // Advance after 4 seconds
-            setTimeout(() => {
-                lobby.currentQuestion++;
-                if (lobby.currentQuestion < lobby.quiz.questions.length) {
-                    sendQuestion(pin);
-                } else {
-                    lobby.state = "FINISHED";
-                    // Only send final leaderboard to host; tell players game is over
-                    io.to(lobby.host).emit("game-over", sortedPlayers);
-                    lobby.players.forEach(p => {
-                        if (p.id !== lobby.host) {
-                            io.to(p.id).emit("game-over", []);
-                        }
+                    const rank = sortedPlayers.findIndex(player => player.id === p.id) + 1;
+                    io.to(p.id).emit("question-results", {
+                        rank,
+                        totalPlayers: sortedPlayers.length,
+                        score: p.score
                     });
                 }
-            }, 4000);
+            });
         }
 
         socket.on("save-to-library", (newQuiz) => {
@@ -293,6 +305,25 @@ app.prepare().then(() => {
                 }
             } catch (error) {
                 console.error("Failed to delete quiz:", error);
+            }
+        });
+
+        socket.on("next-question", (pin) => {
+            const lobby = lobbies.get(pin);
+            if (lobby && lobby.host === socket.id && lobby.state === "RESULTS") {
+                lobby.currentQuestion++;
+                if (lobby.currentQuestion < lobby.quiz.questions.length) {
+                    sendQuestion(pin);
+                } else {
+                    lobby.state = "FINISHED";
+                    const sortedPlayers = lobby.players.sort((a, b) => b.score - a.score);
+                    io.to(lobby.host).emit("game-over", sortedPlayers);
+                    lobby.players.forEach(p => {
+                        if (p.id !== lobby.host) {
+                            io.to(p.id).emit("game-over", []);
+                        }
+                    });
+                }
             }
         });
 

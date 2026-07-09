@@ -32,7 +32,7 @@ export default function Home() {
         socket.emit("get-library");
 
         const params = new URLSearchParams(window.location.search);
-        const isAuthorized = localStorage.getItem("phyjax_auth") === "true";
+        const isAuthorized = localStorage.getItem("quizarc_auth") === "true";
 
         if (params.get("tab") === "library") {
             if (isAuthorized) {
@@ -67,7 +67,7 @@ export default function Home() {
     const handleVerify = (e: React.FormEvent) => {
         e.preventDefault();
         if (verifyKey.toUpperCase() === "STEVEBILLY") {
-            localStorage.setItem("phyjax_auth", "true");
+            localStorage.setItem("quizarc_auth", "true");
             setView("VAULT");
             setVerifyError(false);
         } else {
@@ -85,19 +85,19 @@ export default function Home() {
             <div className="absolute inset-0 noise-bg pointer-events-none -z-5" />
 
             {/* Navbar */}
-            <nav className="sticky top-0 z-50 px-6 py-5 bg-white/60 backdrop-blur-xl border-b border-slate-100/60 transition-all">
-                <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <nav className="sticky top-0 z-50 bg-white/60 backdrop-blur-xl border-b border-slate-100/60 transition-all">
+                <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
                     <button onClick={() => setView("LANDING")} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
                         <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center shadow-xl transform rotate-3">
                             <Zap className="text-white fill-white" size={20} />
                         </div>
-                        <span className="font-jakarta text-2xl font-black text-slate-900 tracking-tightest uppercase">PHYJAX</span>
+                        <span className="font-jakarta text-2xl font-black text-slate-900 tracking-tightest">QuizArc</span>
                     </button>
                     
                     {view !== "LANDING" && (
                         <button 
                             onClick={() => {
-                                const isAuthorized = localStorage.getItem("phyjax_auth") === "true";
+                                const isAuthorized = localStorage.getItem("quizarc_auth") === "true";
                                 if ((view === "FORGE_TYPE" || view === "VAULT") && isAuthorized) {
                                     setView("VAULT");
                                 } else {
@@ -113,7 +113,7 @@ export default function Home() {
                     <div className="hidden lg:flex items-center gap-4">
                         <button 
                             onClick={() => {
-                                const isAuthorized = localStorage.getItem("phyjax_auth") === "true";
+                                const isAuthorized = localStorage.getItem("quizarc_auth") === "true";
                                 setView(isAuthorized ? "VAULT" : "VERIFY");
                             }} 
                             className="bg-slate-900 border border-slate-800 text-white px-6 py-3 rounded-2xl hover:bg-slate-800 hover:shadow-xl hover:scale-[1.02] transition-all duration-300 font-bold text-xs"
@@ -293,7 +293,7 @@ export default function Home() {
                                 <div className="flex items-center gap-4">
                                     <button
                                         onClick={() => {
-                                            localStorage.removeItem("phyjax_auth");
+                                            localStorage.removeItem("quizarc_auth");
                                             setView("LANDING");
                                         }}
                                         className="text-slate-400 hover:text-rose-500 font-black text-[10px] uppercase tracking-widest transition-all px-4"
@@ -359,7 +359,7 @@ export default function Home() {
                                                                 <button 
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
-                                                                        navigator.clipboard.writeText(`https://phyjax.app/join?id=${quiz.id}`);
+                                                                        navigator.clipboard.writeText(`https://quizarc.app/join?id=${quiz.id}`);
                                                                         alert("Arena Reference Link copied to clipboard!");
                                                                         setActiveMenu(null);
                                                                     }}
@@ -374,7 +374,7 @@ export default function Home() {
                                                                         if (newName && newName !== quiz.title) {
                                                                             const updated = library.map(q => q.id === quiz.id ? { ...q, title: newName } : q);
                                                                             setLibrary(updated);
-                                                                            localStorage.setItem("phyjax_library", JSON.stringify(updated));
+                                                                            localStorage.setItem("quizarc_library", JSON.stringify(updated));
                                                                         }
                                                                         setActiveMenu(null);
                                                                     }}
@@ -501,13 +501,13 @@ export default function Home() {
             </div>
 
             {/* Footer */}
-            <footer className="border-t border-slate-100 py-12 px-6">
-                <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
+            <footer className="border-t border-slate-100">
+                <div className="max-w-7xl mx-auto px-6 py-12 flex flex-col md:flex-row justify-between items-center gap-8">
                     <div className="flex items-center gap-2">
                         <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
                             <Zap className="text-white fill-white" size={14} />
                         </div>
-                        <span className="font-jakarta font-bold text-slate-900 uppercase">PHYJAX</span>
+                        <span className="font-jakarta font-bold text-slate-900">QuizArc</span>
                     </div>
                     <div className="text-sm text-slate-400 font-medium">© 2025 DeepMind Education. All rights reserved.</div>
                     <div className="flex gap-6 text-sm font-bold text-slate-600 uppercase tracking-widest text-[10px]">

@@ -6,7 +6,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { 
     Plus, Trash2, ArrowLeft, Save, Image as ImageIcon, 
     CheckCircle, Zap, Clock, ChevronDown, Award, Copy,
-    Layers, Settings, Eye, Loader2, Cloud, AlertTriangle
+    Layers, Settings, Eye, Loader2, Cloud, AlertTriangle,
+    Sparkles, X, Key, ChevronRight
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { io, Socket } from "socket.io-client";
@@ -39,6 +40,21 @@ export default function CreateQuiz() {
     const [isUploading, setIsUploading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
 
+    // AI Generation states
+    const [isAiOpen, setIsAiOpen] = useState(false);
+    const [aiSyllabus, setAiSyllabus] = useState("");
+    const [aiCount, setAiCount] = useState(5);
+    const [aiLevel, setAiLevel] = useState<"EASY" | "MEDIUM" | "HARD">("MEDIUM");
+    const [isGenerating, setIsGenerating] = useState(false);
+    const [aiError, setAiError] = useState("");
+
+    // Preview states
+    const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+    const [previewIdx, setPreviewIdx] = useState(0);
+    const [previewSelectedAns, setPreviewSelectedAns] = useState<number | null>(null);
+    const [previewTextAnswer, setPreviewTextAnswer] = useState("");
+    const [previewSubmitted, setPreviewSubmitted] = useState(false);
+
     useEffect(() => {
         socket = io();
         
@@ -51,6 +67,7 @@ export default function CreateQuiz() {
             setIsSaving(false);
             alert("Error: " + msg);
         });
+
 
         // Load Quiz Data from Server if editing
         const params = new URLSearchParams(window.location.search);
@@ -150,6 +167,66 @@ export default function CreateQuiz() {
         
         // Use Global Intelligence (Server) instead of local memory (LocalStorage)
         socket.emit("save-to-library", newQuiz);
+    };
+
+    const handleAiGenerate = async () => {
+        if (!aiSyllabus.trim()) {
+            setAiError("Please enter a syllabus or topic description.");
+            return;
+        }
+        
+        setIsGenerating(true);
+        setAiError("");
+        
+        try {
+            const savedKey = localStorage.getItem("gemini_user_api_key") || "";
+
+            const response = await fetch("/api/generate-questions", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    syllabus: aiSyllabus,
+                    questionType: fixedType,
+                    count: aiCount,
+                    level: aiLevel,
+                    apiKey: savedKey
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || "Failed to generate questions");
+            }
+            
+            if (data.questions && data.questions.length > 0) {
+                
+                let updatedQuestions = [...questions];
+                const isFirstEmpty = questions.length === 1 && 
+                                     questions[0].question.trim() === "" && 
+                                     questions[0].image == null;
+                                     
+                if (isFirstEmpty) {
+                    updatedQuestions = data.questions;
+                } else {
+                    updatedQuestions = [...updatedQuestions, ...data.questions];
+                }
+                
+                setQuestions(updatedQuestions);
+                setCurrentIdx(isFirstEmpty ? 0 : questions.length);
+                setIsAiOpen(false);
+                setAiSyllabus("");
+            } else {
+                throw new Error("No questions returned from AI generator.");
+            }
+        } catch (err: any) {
+            console.error("AI Generation failed:", err);
+            setAiError(err.message || "Something went wrong. Please try again.");
+        } finally {
+            setIsGenerating(false);
+        }
     };
 
 
@@ -269,7 +346,22 @@ export default function CreateQuiz() {
                 </div>
                 
                 <div className="flex items-center gap-4">
-                    <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-50 text-slate-400 font-bold text-xs hover:bg-slate-100 transition-all">
+                    <button 
+                        onClick={() => setIsAiOpen(true)}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold text-xs transition-all border border-indigo-100/60 active:scale-95 cursor-pointer"
+                    >
+                        <Sparkles size={16} className="text-indigo-600 fill-indigo-100 animate-pulse" /> AI Generate
+                    </button>
+                    <button 
+                        onClick={() => {
+                            setPreviewIdx(0);
+                            setPreviewSelectedAns(null);
+                            setPreviewTextAnswer("");
+                            setPreviewSubmitted(false);
+                            setIsPreviewOpen(true);
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-50 text-slate-500 font-bold text-xs hover:bg-slate-100 transition-all cursor-pointer border border-slate-100/60 active:scale-95"
+                    >
                         <Eye size={16} /> Preview
                     </button>
                     <div className="flex items-center gap-4">
@@ -316,8 +408,8 @@ export default function CreateQuiz() {
                                     </div>
                                 </button>
                                 <div className="flex justify-center gap-2 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button onClick={() => duplicateQuestion(idx)} className="p-1 hover:text-indigo-600 transition-colors"><Copy size={12} /></button>
-                                    <button onClick={() => removeQuestion(idx)} className="p-1 hover:text-rose-500 transition-colors"><Trash2 size={12} /></button>
+                                    <button onClick={() => duplicateQuestion(idx)} className="p-1 hover:text-indigo-600 transition-colors" title="Duplicate Stage"><Copy size={12} /></button>
+                                    <button onClick={() => removeQuestion(idx)} className="p-1 hover:text-rose-500 transition-colors" title="Delete Stage"><Trash2 size={12} /></button>
                                 </div>
                             </div>
                         ))}
@@ -335,8 +427,18 @@ export default function CreateQuiz() {
                 {/* Center: Main Editor */}
                 <section className="flex-1 bg-slate-50 p-6 overflow-y-auto flex flex-col items-center">
                     <div className="w-full max-w-4xl flex flex-col h-full gap-6">
+                        {/* Hidden File Input */}
+                        <input 
+                            type="file" 
+                            id="main-image-upload" 
+                            className="hidden" 
+                            accept="image/*"
+                            onChange={handleImageUpload}
+                            disabled={isUploading}
+                        />
+
                         {/* Question Input */}
-                        <div className="bg-white rounded-[28px] p-6 shadow-sm border border-slate-100 shrink-0">
+                        <div className="bg-white rounded-[28px] p-6 shadow-sm border border-slate-100 shrink-0 flex flex-col items-center">
                             <textarea 
                                 placeholder="Start typing your question..."
                                 className="w-full bg-transparent border-none outline-none text-2xl font-black text-slate-900 placeholder:text-slate-300 text-center resize-none leading-tight"
@@ -344,24 +446,19 @@ export default function CreateQuiz() {
                                 value={currentQ.question}
                                 onChange={(e) => updateQuestion("question", e.target.value)}
                             />
+                            {!currentQ.image && (
+                                <button 
+                                    onClick={() => document.getElementById("main-image-upload")?.click()}
+                                    className="mt-4 flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-50 hover:bg-indigo-50 hover:text-indigo-600 text-slate-400 font-bold text-xs transition-all cursor-pointer border border-slate-100/60 active:scale-95"
+                                >
+                                    <ImageIcon size={14} /> Add Image Media
+                                </button>
+                            )}
                         </div>
 
-                        {/* Image Upload Area */}
-                        <div 
-                            className="flex-1 flex items-center justify-center relative min-h-0"
-                            onDragOver={handleDragOver}
-                            onDragLeave={handleDragLeave}
-                            onDrop={handleDrop}
-                        >
-                            <input 
-                                type="file" 
-                                id="main-image-upload" 
-                                className="hidden" 
-                                accept="image/*"
-                                onChange={handleImageUpload}
-                                disabled={isUploading}
-                            />
-                            {currentQ.image ? (
+                        {/* Image Preview Area - Only shown if an image is selected */}
+                        {currentQ.image && (
+                            <div className="flex-1 flex items-center justify-center relative min-h-0">
                                 <div className={`relative group w-full max-w-4xl h-full flex items-center justify-center bg-slate-100 shadow-xl border-2 ${isDragging ? "border-indigo-500 scale-[1.01]" : "border-slate-100"} transition-all duration-300`}>
                                     <img 
                                         src={currentQ.image} 
@@ -387,31 +484,14 @@ export default function CreateQuiz() {
                                     </label>
                                     <button 
                                         onClick={() => updateQuestion("image", null)}
-                                        className="absolute top-4 right-4 bg-white/20 backdrop-blur-md hover:bg-rose-500 text-white p-2 border border-white/20 transition-all"
+                                        className="absolute top-4 right-4 bg-white/20 backdrop-blur-md hover:bg-rose-500 text-white p-2 border border-white/20 transition-all cursor-pointer"
+                                        title="Delete Image"
                                     >
                                         <Trash2 size={16} />
                                     </button>
                                 </div>
-                            ) : (
-                                <label 
-                                    htmlFor="main-image-upload"
-                                    className={`w-full max-w-4xl aspect-video bg-white border-2 border-dashed flex flex-col items-center justify-center gap-3 transition-all cursor-pointer group px-10 text-center ${isDragging ? "border-indigo-500 bg-indigo-50/50 scale-[1.01] text-indigo-600" : "border-slate-100 text-slate-200 hover:border-indigo-200 hover:text-indigo-400"}`}
-                                >
-                                    {isUploading ? (
-                                        <Loader2 className="text-indigo-600 animate-spin" size={40} />
-                                    ) : (
-                                        <>
-                                            <div className={`w-16 h-16 rounded-none flex items-center justify-center group-hover:scale-110 transition-transform shadow-inner ${isDragging ? "bg-white text-indigo-600" : "bg-slate-50"}`}>
-                                                <ImageIcon size={32} />
-                                            </div>
-                                            <span className="font-black text-[10px] uppercase tracking-[3px]">
-                                                {isDragging ? "Release to Forge" : "Drop Resource Here"}
-                                            </span>
-                                        </>
-                                    )}
-                                </label>
-                            )}
-                        </div>
+                            </div>
+                        )}
 
                         {/* Answers Grid */}
                         <div className="shrink-0 mt-auto">
@@ -454,6 +534,7 @@ export default function CreateQuiz() {
                                             <button 
                                                 onClick={() => updateQuestion("answer", oIdx)}
                                                 className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${currentQ.answer === oIdx ? "bg-white text-indigo-600 shadow-md scale-105" : "bg-slate-50 text-slate-200 hover:text-indigo-400 hover:bg-white border border-slate-100"}`}
+                                                title="Mark as correct answer"
                                             >
                                                 <CheckCircle size={16} />
                                             </button>
@@ -484,11 +565,12 @@ export default function CreateQuiz() {
                             <span className="text-[10px] font-black uppercase tracking-widest">Time Limit</span>
                         </div>
                         <div className="relative group/time">
-                            <select 
-                                className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-black text-xs appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all cursor-pointer"
-                                value={currentQ.time}
-                                onChange={(e) => updateQuestion("time", parseInt(e.target.value))}
-                            >
+                                                            <select 
+                                                                className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-black text-xs appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all cursor-pointer"
+                                                                value={currentQ.time}
+                                                                onChange={(e) => updateQuestion("time", parseInt(e.target.value))}
+                                                                title="Select Time Limit"
+                                                            >
                                 {Array.from({ length: 12 }, (_, i) => (i + 1) * 5).map(val => (
                                     <option key={val} value={val}>{val} Seconds</option>
                                 ))}
@@ -540,6 +622,349 @@ export default function CreateQuiz() {
                     </div>
                 </aside>
             </div>
+
+            {/* AI Generator Modal */}
+            <AnimatePresence>
+                {isAiOpen && (
+                    <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200"
+                    >
+                        <motion.div 
+                            initial={{ scale: 0.95, y: 20 }}
+                            animate={{ scale: 1, y: 0 }}
+                            exit={{ scale: 0.95, y: 20 }}
+                            className="bg-white rounded-[32px] w-full max-w-lg shadow-2xl overflow-hidden border border-slate-100 flex flex-col max-h-[90vh]"
+                        >
+                            {/* Modal Header */}
+                            <div className="p-6 border-b border-slate-50 flex items-center justify-between bg-indigo-50/50">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-200">
+                                        <Sparkles size={20} className="fill-indigo-100 animate-pulse" />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-jakarta text-lg font-black text-slate-900 leading-tight">AI Generator</h3>
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Powered by Google Gemini</p>
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={() => setIsAiOpen(false)}
+                                    className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all cursor-pointer"
+                                    title="Close AI Generator"
+                                >
+                                    <X size={20} />
+                                </button>
+                            </div>
+
+                            {/* Modal Content */}
+                            <div className="p-6 space-y-6 overflow-y-auto flex-1">
+                                {/* Type indicator */}
+                                <div className="bg-slate-50 p-4 rounded-2xl flex items-center justify-between border border-slate-100">
+                                    <div className="flex items-center gap-2">
+                                        <Layers size={16} className="text-indigo-600" />
+                                        <span className="text-xs font-bold text-slate-500">Generating Format:</span>
+                                    </div>
+                                    <span className="bg-indigo-600 text-white font-black text-[10px] uppercase tracking-widest px-2.5 py-1 rounded-full">
+                                        {fixedType.replace("_", " ")}
+                                    </span>
+                                </div>
+
+                                {/* Syllabus Input */}
+                                <div className="space-y-2">
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">
+                                        Syllabus / Topics list
+                                    </label>
+                                    <textarea 
+                                        placeholder="Enter the syllabus topics or copy-paste lecture notes here (e.g. 'Binary Search Trees, insertion and deletion operations, tree rotations...')"
+                                        className="w-full bg-slate-50 border border-slate-100 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl p-4 text-sm font-semibold text-slate-700 placeholder:text-slate-300 outline-none resize-none min-h-[120px] transition-all"
+                                        value={aiSyllabus}
+                                        onChange={(e) => setAiSyllabus(e.target.value)}
+                                        disabled={isGenerating}
+                                    />
+                                </div>
+
+                                {/* Count & API Key setup */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">
+                                            Questions count
+                                        </label>
+                                        <div className="relative">
+                                            <select
+                                                className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-black text-xs appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all cursor-pointer text-slate-700"
+                                                value={aiCount}
+                                                onChange={(e) => setAiCount(parseInt(e.target.value))}
+                                                disabled={isGenerating}
+                                                title="Select questions count"
+                                            >
+                                                {[3, 5, 8, 10, 12, 15].map(val => (
+                                                    <option key={val} value={val}>{val} Questions</option>
+                                                ))}
+                                            </select>
+                                            <ChevronDown size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">
+                                            Difficulty Level
+                                        </label>
+                                        <div className="relative">
+                                            <select
+                                                className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-black text-xs appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all cursor-pointer text-slate-700"
+                                                value={aiLevel}
+                                                onChange={(e) => setAiLevel(e.target.value as any)}
+                                                disabled={isGenerating}
+                                                title="Select difficulty level"
+                                            >
+                                                <option value="EASY">Easy</option>
+                                                <option value="MEDIUM">Medium</option>
+                                                <option value="HARD">Hard</option>
+                                            </select>
+                                            <ChevronDown size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {aiError && (
+                                    <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-start gap-3">
+                                        <AlertTriangle size={18} className="text-rose-500 shrink-0 mt-0.5" />
+                                        <p className="text-xs font-bold text-rose-500 leading-normal">{aiError}</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Modal Footer */}
+                            <div className="p-6 border-t border-slate-50 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
+                                <button 
+                                    onClick={() => setIsAiOpen(false)}
+                                    className="px-5 py-3 rounded-2xl bg-white border border-slate-200 text-slate-500 font-black text-xs hover:bg-slate-100 transition-all cursor-pointer"
+                                    disabled={isGenerating}
+                                >
+                                    Cancel
+                                </button>
+                                <button 
+                                    onClick={handleAiGenerate}
+                                    className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 text-white px-8 py-3 rounded-2xl font-black text-xs transition-all shadow-xl shadow-indigo-100/50 active:scale-95 flex items-center gap-2 cursor-pointer animate-pulse"
+                                    disabled={isGenerating}
+                                >
+                                    {isGenerating ? (
+                                        <>
+                                            <Loader2 size={16} className="animate-spin" /> Generating...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Sparkles size={16} /> Generate Stages
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Live Preview Modal */}
+            <AnimatePresence>
+                {isPreviewOpen && (
+                    <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
+                    >
+                        <motion.div 
+                            initial={{ scale: 0.95, y: 20 }}
+                            animate={{ scale: 1, y: 0 }}
+                            exit={{ scale: 0.95, y: 20 }}
+                            className="bg-white rounded-[32px] w-full max-w-2xl shadow-2xl overflow-hidden border border-slate-100 flex flex-col max-h-[90vh]"
+                        >
+                            {/* Modal Header */}
+                            <div className="p-6 border-b border-slate-50 flex items-center justify-between bg-slate-900 text-white">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+                                        <Eye size={20} />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-jakarta text-lg font-black leading-tight uppercase tracking-tight">Arena Preview</h3>
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Simulating player perspective</p>
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={() => setIsPreviewOpen(false)}
+                                    className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all cursor-pointer"
+                                    title="Close Preview"
+                                >
+                                    <X size={20} />
+                                </button>
+                            </div>
+
+                            {/* Modal Content */}
+                            {previewIdx < questions.length ? (
+                                <div className="p-8 flex-1 overflow-y-auto space-y-6 flex flex-col min-h-0">
+                                    {/* Question progress and stats */}
+                                    <div className="flex items-center justify-between text-xs font-black uppercase tracking-widest text-slate-400">
+                                        <span>Stage {previewIdx + 1} of {questions.length}</span>
+                                        <div className="flex items-center gap-4">
+                                            <span className="flex items-center gap-1"><Award size={14} className="text-amber-500" /> {questions[previewIdx].points} PTS</span>
+                                            <span className="flex items-center gap-1"><Clock size={14} className="text-indigo-500" /> {questions[previewIdx].time}s</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Question Text */}
+                                    <h4 className="font-jakarta text-2xl font-black text-slate-900 text-center leading-tight py-4">
+                                        {questions[previewIdx].question || "Untitled Stage"}
+                                    </h4>
+
+                                    {/* Image Section - Rendered only if present. No placeholder box if missing! */}
+                                    {questions[previewIdx].image && (
+                                        <div className="w-full max-h-[220px] rounded-2xl overflow-hidden bg-slate-100 border border-slate-100 flex items-center justify-center shrink-0">
+                                            <img 
+                                                src={questions[previewIdx].image} 
+                                                className="w-full h-full object-contain" 
+                                                alt="Stage Resource" 
+                                            />
+                                        </div>
+                                    )}
+
+                                    {/* Options / Answers grid */}
+                                    <div className="flex-1 flex flex-col justify-end">
+                                        {questions[previewIdx].type === "TYPE_ANSWER" ? (
+                                            <div className="space-y-4">
+                                                <div className="relative">
+                                                    <input 
+                                                        type="text"
+                                                        placeholder="Type your answer here..."
+                                                        className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-500/10 rounded-2xl px-6 py-4 text-base font-bold outline-none transition-all"
+                                                        value={previewTextAnswer}
+                                                        onChange={(e) => setPreviewTextAnswer(e.target.value)}
+                                                        disabled={previewSubmitted}
+                                                    />
+                                                    {previewSubmitted && (
+                                                        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center">
+                                                            {(() => {
+                                                                const isCorrect = (questions[previewIdx].answer as string[]).some(
+                                                                    ans => ans.toString().trim() !== "" && 
+                                                                    ans.toString().trim().toLowerCase() === previewTextAnswer.toString().trim().toLowerCase()
+                                                                );
+                                                                return isCorrect ? (
+                                                                    <span className="text-emerald-500 font-bold text-xs uppercase flex items-center gap-1"><CheckCircle size={16} /> Correct</span>
+                                                                ) : (
+                                                                    <span className="text-rose-500 font-bold text-xs uppercase flex items-center gap-1"><X size={16} /> Incorrect</span>
+                                                                );
+                                                            })()}
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {!previewSubmitted ? (
+                                                    <button 
+                                                        onClick={() => setPreviewSubmitted(true)}
+                                                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all cursor-pointer"
+                                                        disabled={!previewTextAnswer.trim()}
+                                                    >
+                                                        Submit Answer
+                                                    </button>
+                                                ) : (
+                                                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl space-y-1">
+                                                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Acceptable Answers:</span>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {(questions[previewIdx].answer as string[]).filter(ans => ans.trim() !== "").map((ans, idx) => (
+                                                                <span key={idx} className="bg-white border border-slate-100 px-3 py-1 rounded-xl text-xs font-bold text-slate-700">{ans}</span>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div className="grid grid-cols-2 gap-3">
+                                                {questions[previewIdx].options.map((opt, idx) => {
+                                                    const isCorrect = idx === questions[previewIdx].answer;
+                                                    const isSelected = idx === previewSelectedAns;
+                                                    
+                                                    let cardStyle = "bg-white border-slate-100 text-slate-700 hover:border-indigo-100";
+                                                    if (previewSubmitted) {
+                                                        if (isCorrect) {
+                                                            cardStyle = "bg-emerald-50 border-emerald-300 text-emerald-700 shadow-md shadow-emerald-50";
+                                                        } else if (isSelected) {
+                                                            cardStyle = "bg-rose-50 border-rose-300 text-rose-700";
+                                                        } else {
+                                                            cardStyle = "bg-white border-slate-100 text-slate-300 opacity-60";
+                                                        }
+                                                    }
+
+                                                    return (
+                                                        <button
+                                                            key={idx}
+                                                            onClick={() => {
+                                                                if (!previewSubmitted) {
+                                                                    setPreviewSelectedAns(idx);
+                                                                    setPreviewSubmitted(true);
+                                                                }
+                                                            }}
+                                                            disabled={previewSubmitted}
+                                                            className={`h-16 border-2 rounded-2xl px-6 font-bold text-sm transition-all flex items-center justify-between text-left cursor-pointer ${cardStyle}`}
+                                                        >
+                                                            <span>{opt}</span>
+                                                            {previewSubmitted && isCorrect && <CheckCircle size={16} className="text-emerald-500 shrink-0" />}
+                                                            {previewSubmitted && isSelected && !isCorrect && <X size={16} className="text-rose-500 shrink-0" />}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="p-12 text-center flex flex-col items-center justify-center space-y-6">
+                                    <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-[28px] flex items-center justify-center shadow-lg shadow-indigo-100">
+                                        <Award size={36} />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-jakarta text-2xl font-black text-slate-900 uppercase">Preview Complete</h3>
+                                        <p className="text-slate-400 font-bold text-xs uppercase tracking-widest mt-1">All stages verified successfully</p>
+                                    </div>
+                                    <button 
+                                        onClick={() => {
+                                            setPreviewIdx(0);
+                                            setPreviewSelectedAns(null);
+                                            setPreviewTextAnswer("");
+                                            setPreviewSubmitted(false);
+                                        }}
+                                        className="px-6 py-3 bg-slate-900 hover:bg-black text-white font-black text-xs uppercase tracking-widest rounded-2xl transition-all cursor-pointer active:scale-95"
+                                    >
+                                        Run Again
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Modal Footer */}
+                            <div className="p-6 border-t border-slate-50 bg-slate-50 flex items-center justify-between shrink-0">
+                                <button 
+                                    onClick={() => setIsPreviewOpen(false)}
+                                    className="px-5 py-3 rounded-2xl bg-white border border-slate-200 text-slate-500 font-black text-xs hover:bg-slate-100 transition-all cursor-pointer"
+                                >
+                                    Exit Preview
+                                </button>
+                                {previewIdx < questions.length && previewSubmitted && (
+                                    <button 
+                                        onClick={() => {
+                                            setPreviewIdx(previewIdx + 1);
+                                            setPreviewSelectedAns(null);
+                                            setPreviewTextAnswer("");
+                                            setPreviewSubmitted(false);
+                                        }}
+                                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-2xl font-black text-xs transition-all shadow-xl shadow-indigo-100/50 active:scale-95 cursor-pointer flex items-center gap-2"
+                                    >
+                                        {previewIdx === questions.length - 1 ? "Finish" : "Next Stage"} <ChevronRight size={14} />
+                                    </button>
+                                )}
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </main>
     );
 }
